@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enertech Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0f1117;--card:#1a1d27;--card2:#222535;--border:#2d3148;--accent:#6c63ff;--accent2:#00d4aa;--text:#e8eaf0;--text2:#9499b5;--green:#2ecc71;--red:#e74c3c;--yellow:#f39c12}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:14px}
+#app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+header{background:var(--card);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;flex-shrink:0}
+header h1{font-size:18px;font-weight:700;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+#status-bar{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
+#status-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+#status-dot.loading{background:var(--yellow);animation:pulse 1s infinite}
+#status-dot.error{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+nav{background:var(--card);border-bottom:1px solid var(--border);display:flex;padding:0 24px;flex-shrink:0}
+nav button{padding:12px 20px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text2);cursor:pointer;font-size:13px;font-weight:500;transition:.2s;white-space:nowrap}
+nav button:hover{color:var(--text)}
+nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+.controls{background:var(--card2);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;align-items:center;gap:12px;flex-shrink:0;flex-wrap:wrap}
+.controls label{color:var(--text2);font-size:12px}
+.controls select,.controls input[type=date]{background:var(--card);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px}
+#cost-controls{display:flex;gap:16px;align-items:center;margin-left:auto}
+#cost-controls label{color:var(--text2);font-size:12px;display:flex;align-items:center;gap:4px}
+#cost-controls input{width:72px;background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px}
+main{flex:1;overflow:hidden;position:relative}
+.tab-panel{display:none;height:100%;overflow-y:auto;padding:20px 24px;gap:16px;flex-direction:column}
+.tab-panel.active{display:flex}
+#tab-map{padding:0}
+#tab-map.active{display:flex;flex-direction:column}
+.kpi-row{display:grid;gap:12px}
+.kpi-4{grid-template-columns:repeat(4,1fr)}
+.kpi-5{grid-template-columns:repeat(5,1fr)}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:4px}
+.kpi-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.kpi-value{font-size:26px;font-weight:700;line-height:1.2}
+.kpi-sub{font-size:11px;color:var(--text2)}
+.green{color:var(--green)}.red{color:var(--red)}.yellow{color:var(--yellow)}.blue{color:#3498db}
+.charts-row{display:grid;gap:12px}
+.c3{grid-template-columns:repeat(3,1fr)}
+.c2{grid-template-columns:2fr 1fr}
+.c2b{grid-template-columns:1fr 1fr}
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px}
+.chart-card h3{font-size:12px;font-weight:600;margin-bottom:12px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.chart-card canvas{max-height:220px}
+.table-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;overflow:auto}
+.table-card h3{font-size:12px;font-weight:600;margin-bottom:12px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;background:var(--card);padding-bottom:8px;z-index:1}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:7px 10px;color:var(--text2);font-weight:500;border-bottom:1px solid var(--border);position:sticky;top:38px;background:var(--card);z-index:1}
+td{padding:6px 10px;border-bottom:1px solid #2d314820;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--card2)}
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600}
+.bg{background:#2ecc7122;color:var(--green)}.br{background:#e74c3c22;color:var(--red)}.by{background:#f39c1222;color:var(--yellow)}
+.bar-bg{background:var(--card2);border-radius:4px;height:6px;overflow:hidden;display:inline-block}
+.bar-f{height:100%;border-radius:4px;background:var(--accent)}
+.bar-g{background:var(--green)}.bar-y{background:var(--yellow)}.bar-r{background:var(--red)}
+.rank{width:22px;height:22px;border-radius:50%;background:var(--accent)22;color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+#map-container{flex:1;position:relative;min-height:0}
+#map{width:100%;height:100%}
+#map-sidebar{position:absolute;top:0;right:0;width:260px;height:100%;background:var(--card);border-left:1px solid var(--border);overflow-y:auto;z-index:1000;padding:10px}
+#map-sidebar h3{font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:8px;letter-spacing:.5px}
+.mcp{padding:7px;border-radius:6px;cursor:pointer;border:1px solid transparent;margin-bottom:3px;font-size:11px}
+.mcp:hover{background:var(--card2);border-color:var(--border)}
+.mcp .mn{font-weight:500;margin-bottom:1px}
+.mcp .mm{color:var(--text2)}
+.map-ctrl{padding:8px 12px;background:var(--card);border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:center;flex-shrink:0;flex-wrap:wrap}
+.map-ctrl label{font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;cursor:pointer}
+.map-ctrl input[type=range]{accent-color:var(--accent)}
+.overlay{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:9999}
+.prog-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:32px 40px;text-align:center;min-width:320px}
+.prog-box h2{font-size:16px;margin-bottom:16px}
+.prog-track{background:var(--card2);border-radius:6px;height:8px;overflow:hidden;margin-bottom:12px}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:6px;transition:.3s}
+.prog-txt{font-size:12px;color:var(--text2)}
+#err{display:none;background:#e74c3c22;border:1px solid #e74c3c44;color:var(--red);padding:10px 24px;font-size:12px;flex-shrink:0}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="overlay" id="overlay">
+    <div class="prog-box">
+      <h2>⚡ Loading Dashboard</h2>
+      <div class="prog-track"><div class="prog-fill" id="pfill" style="width:0%"></div></div>
+      <div class="prog-txt" id="ptxt">Authenticating...</div>
+    </div>
+  </div>
+
+  <header>
+    <h1>⚡ Enertech Dashboard</h1>
+    <div id="status-bar">
+      <div id="status-dot" class="loading"></div>
+      <span id="smsg">Loading...</span>
+    </div>
+  </header>
+
+  <div id="err"></div>
+
+  <nav>
+    <button class="active" onclick="showTab('overview')">Overview</button>
+    <button onclick="showTab('utilization')">Utilization</button>
+    <button onclick="showTab('profitability')">Profitability</button>
+    <button onclick="showTab('payout')">Revenue Payout</button>
+    <button onclick="showTab('map')">Map &amp; Heat Map</button>
+  </nav>
+
+  <div class="controls">
+    <label>Date Range</label>
+    <select id="rsel" onchange="onRangeChange()">
+      <option value="all">All Time</option>
+      <option value="7">Last 7 Days</option>
+      <option value="30" selected>Last 30 Days</option>
+      <option value="90">Last 90 Days</option>
+      <option value="365">Last Year</option>
+      <option value="custom">Custom</option>
+    </select>
+    <input type="date" id="dfrom" style="display:none" onchange="applyFilters()">
+    <input type="date" id="dto"   style="display:none" onchange="applyFilters()">
+    <div id="cost-controls">
+      <label>⚡ Elec $/kWh <input type="number" id="celec"  value="0.16" step="0.01" min="0" onchange="applyFilters()"></label>
+      <label>🤝 Share $/kWh <input type="number" id="cshare" value="0.03" step="0.01" min="0" onchange="applyFilters()"></label>
+      <label>💼 Ops $/mo/charger <input type="number" id="cops"  value="20"   step="1"    min="0" onchange="applyFilters()"></label>
+    </div>
+  </div>
+
+  <main>
+    <!-- OVERVIEW -->
+    <div class="tab-panel active" id="tab-overview">
+      <div class="kpi-row kpi-4" id="ov-kpis"></div>
+      <div class="charts-row c3">
+        <div class="chart-card"><h3>Energy (kWh) Over Time</h3><canvas id="ch-energy"></canvas></div>
+        <div class="chart-card"><h3>Sessions Over Time</h3><canvas id="ch-sessions"></canvas></div>
+        <div class="chart-card"><h3>Charger Status</h3><canvas id="ch-status"></canvas></div>
+      </div>
+      <div class="charts-row c2">
+        <div class="table-card" style="max-height:340px">
+          <h3>Recent Sessions</h3>
+          <table><thead><tr><th>ID</th><th>Site</th><th>Started</th><th>kWh</th><th>Revenue</th><th>Duration</th></tr></thead>
+          <tbody id="tb-sess"></tbody></table>
+        </div>
+        <div class="chart-card"><h3>Avg kWh / Session (Monthly)</h3><canvas id="ch-avgkwh"></canvas></div>
+      </div>
+    </div>
+
+    <!-- UTILIZATION -->
+    <div class="tab-panel" id="tab-utilization">
+      <div class="kpi-row kpi-4" id="ut-kpis"></div>
+      <div class="charts-row c2b">
+        <div class="table-card" style="max-height:380px">
+          <h3>🏆 Site Rankings by Utilization</h3>
+          <table><thead><tr><th>#</th><th>Site</th><th>Chargers</th><th>Sessions</th><th>kWh/Day</th><th>Hrs/Day</th><th>Util %</th></tr></thead>
+          <tbody id="tb-site-rank"></tbody></table>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="chart-card"><h3>Top Sites — kWh/Day</h3><canvas id="ch-site-kwh"></canvas></div>
+          <div class="chart-card"><h3>Top Sites — Utilization %</h3><canvas id="ch-site-util"></canvas></div>
+        </div>
+      </div>
+      <div class="charts-row c2b">
+        <div class="chart-card"><h3>Daily kWh (Portfolio)</h3><canvas id="ch-daily-kwh"></canvas></div>
+        <div class="chart-card"><h3>Daily Sessions</h3><canvas id="ch-daily-sess"></canvas></div>
+      </div>
+    </div>
+
+    <!-- PROFITABILITY -->
+    <div class="tab-panel" id="tab-profitability">
+      <div class="kpi-row kpi-4" id="pr-kpis"></div>
+      <div class="charts-row c2b">
+        <div class="table-card" style="max-height:380px">
+          <h3>Site Profitability</h3>
+          <table><thead><tr><th>Site</th><th>Revenue</th><th>Elec</th><th>Share</th><th>Ops</th><th>Profit</th><th>Margin</th></tr></thead>
+          <tbody id="tb-site-profit"></tbody></table>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="chart-card"><h3>Portfolio Cost Breakdown</h3><canvas id="ch-cost-donut"></canvas></div>
+          <div class="chart-card"><h3>Monthly Profit Trend</h3><canvas id="ch-monthly-profit"></canvas></div>
+        </div>
+      </div>
+      <div class="table-card" style="max-height:340px">
+        <h3>Charger-Level Profitability (Top 30 by Revenue)</h3>
+        <table><thead><tr><th>Charger ID</th><th>Site</th><th>kW</th><th>Sessions</th><th>kWh</th><th>Revenue</th><th>Total Cost</th><th>Profit</th><th>Margin</th></tr></thead>
+        <tbody id="tb-cp-profit"></tbody></table>
+      </div>
+    </div>
+
+    <!-- REVENUE PAYOUT -->
+    <div class="tab-panel" id="tab-payout">
+      <div class="kpi-row kpi-5" id="po-kpis"></div>
+      <div class="charts-row c2b">
+        <div class="chart-card"><h3>Revenue vs Costs Over Time</h3><canvas id="ch-rev-trend"></canvas></div>
+        <div class="chart-card"><h3>Revenue Distribution</h3><canvas id="ch-rev-donut"></canvas></div>
+      </div>
+      <div class="table-card" style="max-height:380px">
+        <h3>Site-Level Payout Summary</h3>
+        <table><thead><tr><th>Site</th><th>Chargers</th><th>kWh</th><th>Gross Revenue</th><th>Owner Payout</th><th>Elec Cost</th><th>Ops Cost</th><th>Net to You</th></tr></thead>
+        <tbody id="tb-site-payout"></tbody></table>
+      </div>
+    </div>
+
+    <!-- MAP -->
+    <div class="tab-panel" id="tab-map">
+      <div class="map-ctrl">
+        <label><input type="checkbox" id="heat-tog" checked onchange="toggleHeat()"> Heat Map</label>
+        <label><input type="checkbox" id="mark-tog" checked onchange="toggleMarkers()"> Markers</label>
+        <label>Radius <input type="range" id="heat-r" min="10" max="80" value="30" oninput="updateHeat()"></label>
+        <label>Intensity <input type="range" id="heat-i" min="1" max="20" value="5" oninput="updateHeat()"></label>
+        <span id="map-info" style="color:var(--text2);font-size:11px;margin-left:auto"></span>
+      </div>
+      <div id="map-container">
+        <div id="map"></div>
+        <div id="map-sidebar">
+          <h3>Charge Points</h3>
+          <div id="mcp-list"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const API='https://partner-api.monta.com/api/v1';
+const CID='47095201-e97d-4697-ae5a-d7914655f6cf';
+const CSC='184d8bdb-7820-4d1e-b364-fb61ee3e068b';
+
+let token=null,allCPs=[],allCharges=[],siteMap={};
+let charts={},mapInst=null,heatLayer=null,markerGroup=null,mapReady=false;
+let curTab='overview';
+
+const fmt=(n,d=1)=>n==null?'—':n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtK=n=>n>=1000?(n/1000).toFixed(1)+'k':fmt(n,0);
+const $=(id)=>document.getElementById(id);
+const fmtC=n=>n==null?'—':'$'+fmt(n,2);
+const fmtP=n=>n==null?'—':fmt(n*100,1)+'%';
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+function setP(p,msg){$('pfill').style.width=p+'%';$('ptxt').textContent=msg;}
+function setSt(msg,s='ok'){$('smsg').textContent=msg;const d=$('status-dot');d.className=s==='loading'?'loading':s==='error'?'error':'';}
+
+async function auth(){
+  const r=await fetch(`${API}/auth/token`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:CID,clientSecret:CSC})});
+  if(!r.ok) throw new Error(`Auth ${r.status}`);
+  token=(await r.json()).accessToken;
+}
+
+async function apiGet(path,params={}){
+  const u=new URL(`${API}${path}`);
+  Object.entries(params).forEach(([k,v])=>v!==undefined&&u.searchParams.set(k,v));
+  const r=await fetch(u,{headers:{Authorization:`Bearer ${token}`}});
+  if(!r.ok) throw new Error(`${path} → ${r.status}`);
+  return r.json();
+}
+
+async function fetchAll(path,params={},cb=null){
+  let res=[],page=0;
+  while(true){
+    const d=await apiGet(path,{...params,page,perPage:100});
+    const items=d.data||[];
+    res=res.concat(items);
+    const tp=d.meta?.totalPageCount??1;
+    if(cb) cb(res.length,d.meta?.totalItemCount??res.length);
+    if(page+1>=tp||!items.length) break;
+    page++;
+  }
+  return res;
+}
+
+function getCoords(obj){
+  const cands=[
+    [obj?.location?.coordinates?.latitude,obj?.location?.coordinates?.longitude],
+    [obj?.location?.latitude,obj?.location?.longitude],
+    [obj?.latitude,obj?.longitude],
+  ];
+  for(const [la,lo] of cands){
+    if(la!=null&&lo!=null&&!isNaN(la)&&!isNaN(lo)){
+      const lat=parseFloat(la),lng=parseFloat(lo);
+      if(lat>=-90&&lat<=90&&lng>=-180&&lng<=180&&(lat!==0||lng!==0)) return{lat,lng};
+    }
+  }
+  return null;
+}
+
+function buildSiteMap(cps){
+  const m={};
+  cps.forEach(cp=>{
+    const sid=cp.siteId||cp.teamId||'unknown';
+    if(!m[sid]){
+      const a=cp.location?.address;
+      let name=`Site ${sid}`;
+      if(a){const pts=[a.address1,a.city].filter(Boolean);if(pts.length) name=pts.join(', ');}
+      m[sid]={id:sid,name,cps:[],coords:getCoords(cp)};
+    }
+    m[sid].cps.push(cp);
+    if(!m[sid].coords) m[sid].coords=getCoords(cp);
+  });
+  return m;
+}
+
+// Duration: API has no duration field — calculate from timestamps
+function getDurS(c){
+  const start=c.startedAt||c.cablePluggedInAt||c.createdAt;
+  const end=c.stoppedAt||c.completedAt||c.releasedAt||c.updatedAt;
+  if(start&&end){
+    const diff=(new Date(end)-new Date(start))/1000;
+    if(diff>0&&diff<86400*7) return diff;
+  }
+  return 0;
+}
+
+function getRange(){
+  const sel=$('rsel').value;
+  const to=new Date();to.setHours(23,59,59,999);
+  if(sel==='custom'){
+    const f=$('dfrom').value,t=$('dto').value;
+    const from=f?new Date(f):new Date(0);
+    const toe=t?new Date(t):new Date();toe.setHours(23,59,59,999);
+    return{from,to:toe};
+  }
+  if(sel==='all') return{from:new Date(0),to};
+  const from=new Date();from.setDate(from.getDate()-parseInt(sel));
+  return{from,to};
+}
+function filterCharges(charges){
+  const{from,to}=getRange();
+  return charges.filter(c=>{const d=new Date(c.startedAt||c.createdAt);return d>=from&&d<=to;});
+}
+function getDays(){
+  const sel=$('rsel').value;
+  if(sel==='all'){
+    const dates=allCharges.map(c=>new Date(c.startedAt||c.createdAt)).filter(d=>!isNaN(d));
+    if(!dates.length) return 30;
+    return Math.max(1,Math.round((Math.max(...dates)-Math.min(...dates))/86400000)+1);
+  }
+  const{from,to}=getRange();
+  return Math.max(1,Math.round((to-from)/86400000));
+}
+function onRangeChange(){
+  const c=$('rsel').value==='custom';
+  $('dfrom').style.display=c?'':'none';
+  $('dto').style.display=c?'':'none';
+  applyFilters();
+}
+
+function costs(){
+  return{
+    elec:parseFloat($('celec').value)||0.16,
+    share:parseFloat($('cshare').value)||0.03,
+    ops:parseFloat($('cops').value)||20,
+  };
+}
+function calcP(rev,kwh,nCPs,nDays){
+  const{elec,share,ops}=costs();
+  const ec=kwh*elec,sc=kwh*share,oc=ops*nCPs*(nDays/30.44);
+  const tc=ec+sc+oc,profit=rev-tc,margin=rev>0?profit/rev:null;
+  return{ec,sc,oc,tc,profit,margin};
+}
+
+function cpStats(charges,cps){
+  const byId={};
+  cps.forEach(cp=>{byId[cp.id]=cp;});
+  const s={};
+  cps.forEach(cp=>{s[cp.id]={cp,sessions:0,kwh:0,revenue:0,durH:0,siteId:cp.siteId||'unknown'};});
+  charges.forEach(c=>{
+    const id=c.chargePointId;
+    if(!s[id]) s[id]={cp:byId[id]||{id,siteId:'unknown'},sessions:0,kwh:0,revenue:0,durH:0,siteId:'unknown'};
+    s[id].sessions++;
+    s[id].kwh+=c.consumedKwh??0;
+    s[id].revenue+=c.price??0;
+    s[id].durH+=getDurS(c)/3600;
+  });
+  return s;
+}
+
+function buildSiteStats(charges,sm,nDays){
+  const s={};
+  Object.entries(sm).forEach(([sid,site])=>{
+    s[sid]={site,sid,sessions:0,kwh:0,revenue:0,durH:0,nCPs:site.cps.length||1};
+  });
+  const cps=cpStats(charges,allCPs);
+  Object.values(cps).forEach(cs=>{
+    const sid=cs.siteId;
+    if(!s[sid]) s[sid]={site:{name:`Site ${sid}`,cps:[]},sid,sessions:0,kwh:0,revenue:0,durH:0,nCPs:1};
+    s[sid].sessions+=cs.sessions;
+    s[sid].kwh+=cs.kwh;
+    s[sid].revenue+=cs.revenue;
+    s[sid].durH+=cs.durH;
+  });
+  Object.values(s).forEach(ss=>{
+    const n=ss.nCPs;
+    ss.kwhPerDay=nDays>0?ss.kwh/nDays:0;
+    ss.hrsPerDay=nDays>0?ss.durH/nDays:0;
+    ss.utilPct=n*nDays*24>0?ss.durH/(n*nDays*24):0;
+    ss.profit=calcP(ss.revenue,ss.kwh,n,nDays);
+  });
+  return s;
+}
+
+const PAL=['#6c63ff','#00d4aa','#ffa94d','#ff6b6b','#74c0fc','#63e6be','#ffd43b','#a9e34b','#da77f2','#ff8787'];
+function mkChart(id,type,labels,datasets,extra={}){
+  if(charts[id]) charts[id].destroy();
+  const el=$(id);if(!el)return;
+  const isXY=type==='bar'||type==='line';
+  charts[id]=new Chart(el,{type,data:{labels,datasets},options:{
+    responsive:true,maintainAspectRatio:true,
+    plugins:{legend:{labels:{color:'#9499b5',font:{size:11}}},...(extra.plugins||{})},
+    scales:isXY?{
+      x:{ticks:{color:'#9499b5',font:{size:10}},grid:{color:'#2d314833'}},
+      y:{ticks:{color:'#9499b5',font:{size:10}},grid:{color:'#2d314833'}},
+      ...(extra.scales||{})
+    }:{},
+    ...extra
+  }});
+}
+
+function dailyAgg(charges,valFn){
+  const m={};
+  charges.forEach(c=>{
+    const d=(c.startedAt||c.createdAt||'').slice(0,10);
+    if(!d) return;
+    m[d]=(m[d]||0)+valFn(c);
+  });
+  const k=Object.keys(m).sort();
+  return{labels:k.map(x=>x.slice(5)),data:k.map(x=>m[x])};
+}
+
+function renderOverview(charges){
+  const kwh=charges.reduce((a,c)=>a+(c.consumedKwh??0),0);
+  const rev=charges.reduce((a,c)=>a+(c.price??0),0);
+  const n=charges.length,avgKwh=n>0?kwh/n:0;
+  const activeCP=new Set(charges.map(c=>c.chargePointId)).size;
+  $('ov-kpis').innerHTML=`
+    <div class="kpi"><div class="kpi-label">Total Sessions</div><div class="kpi-value">${fmtK(n)}</div><div class="kpi-sub">${allCharges.length} all-time</div></div>
+    <div class="kpi"><div class="kpi-label">Total Energy</div><div class="kpi-value green">${fmtK(kwh)} kWh</div><div class="kpi-sub">Avg ${fmt(avgKwh)} kWh/session</div></div>
+    <div class="kpi"><div class="kpi-label">Gross Revenue</div><div class="kpi-value">${fmtC(rev)}</div><div class="kpi-sub">Avg ${fmtC(n>0?rev/n:0)}/session</div></div>
+    <div class="kpi"><div class="kpi-label">Active Chargers</div><div class="kpi-value">${activeCP}<span style="font-size:14px;color:var(--text2)">/${allCPs.length}</span></div><div class="kpi-sub">of ${allCPs.length} total</div></div>
+  `;
+  const te=dailyAgg(charges,c=>c.consumedKwh??0);
+  mkChart('ch-energy','line',te.labels,[{label:'kWh',data:te.data,borderColor:'#6c63ff',backgroundColor:'#6c63ff22',fill:true,tension:.3,pointRadius:0}]);
+  const ts=dailyAgg(charges,()=>1);
+  mkChart('ch-sessions','bar',ts.labels,[{label:'Sessions',data:ts.data,backgroundColor:'#00d4aa88',borderColor:'#00d4aa',borderWidth:1}]);
+  const sc={};allCPs.forEach(cp=>{const st=cp.state||cp.status||'unknown';sc[st]=(sc[st]||0)+1;});
+  const sl=Object.keys(sc);
+  mkChart('ch-status','doughnut',sl,[{data:sl.map(k=>sc[k]),backgroundColor:PAL,borderWidth:0}],{plugins:{legend:{position:'right',labels:{color:'#9499b5',font:{size:11}}}}});
+  const ma={};
+  charges.forEach(c=>{const d=(c.startedAt||c.createdAt||'').slice(0,7);if(!d)return;if(!ma[d])ma[d]={kwh:0,n:0};ma[d].kwh+=c.consumedKwh??0;ma[d].n++;});
+  const mk=Object.keys(ma).sort();
+  mkChart('ch-avgkwh','bar',mk,[{label:'Avg kWh/Session',data:mk.map(k=>ma[k].n>0?ma[k].kwh/ma[k].n:0),backgroundColor:'#ffa94d88',borderColor:'#ffa94d',borderWidth:1}]);
+  const recent=[...charges].sort((a,b)=>new Date(b.startedAt||b.createdAt)-new Date(a.startedAt||a.createdAt)).slice(0,50);
+  $('tb-sess').innerHTML=recent.map(c=>{
+    const cp=allCPs.find(x=>x.id===c.chargePointId);
+    const site=cp?siteMap[cp.siteId]?.name||'—':'—';
+    const dur=getDurS(c);
+    return `<tr>
+      <td style="color:var(--text2);font-size:11px">${c.humanReadableId||c.id}</td>
+      <td>${site}</td>
+      <td>${(c.startedAt||c.createdAt||'').slice(0,16).replace('T',' ')}</td>
+      <td>${fmt(c.consumedKwh??0)}</td>
+      <td>${fmtC(c.price??0)}</td>
+      <td>${Math.floor(dur/3600)}h ${Math.floor((dur%3600)/60)}m</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderUtilization(charges,ss,nDays){
+  const kwh=charges.reduce((a,c)=>a+(c.consumedKwh??0),0);
+  const n=charges.length;
+  const durH=charges.reduce((a,c)=>a+getDurS(c)/3600,0);
+  const maxH=allCPs.length*nDays*24;
+  const util=maxH>0?durH/maxH:0;
+  $('ut-kpis').innerHTML=`
+    <div class="kpi"><div class="kpi-label">kWh / Day</div><div class="kpi-value green">${fmt(nDays>0?kwh/nDays:0)}</div><div class="kpi-sub">Portfolio total</div></div>
+    <div class="kpi"><div class="kpi-label">Sessions / Day</div><div class="kpi-value">${fmt(nDays>0?n/nDays:0)}</div><div class="kpi-sub">All chargers</div></div>
+    <div class="kpi"><div class="kpi-label">Hrs Charging / Day</div><div class="kpi-value">${fmt(nDays>0?durH/nDays:0)}</div><div class="kpi-sub">Portfolio active hrs</div></div>
+    <div class="kpi"><div class="kpi-label">Utilization %</div><div class="kpi-value ${util>0.2?'green':util>0.1?'yellow':'red'}">${fmtP(util)}</div><div class="kpi-sub">Active / Available hrs</div></div>
+  `;
+  const sites=Object.values(ss).filter(s=>s.sessions>0).sort((a,b)=>b.kwhPerDay-a.kwhPerDay);
+  $('tb-site-rank').innerHTML=sites.map((s,i)=>{
+    const p=s.utilPct,bc=p>0.2?'bar-g':p>0.1?'bar-y':'bar-r';
+    return `<tr>
+      <td><div class="rank">${i+1}</div></td>
+      <td><strong>${s.site.name}</strong></td>
+      <td style="text-align:center">${s.nCPs}</td>
+      <td style="text-align:center">${s.sessions}</td>
+      <td>${fmt(s.kwhPerDay)}</td>
+      <td>${fmt(s.hrsPerDay,2)}</td>
+      <td><div style="display:flex;align-items:center;gap:6px">
+        <div class="bar-bg" style="width:60px"><div class="bar-f ${bc}" style="width:${clamp(p*100,0,100)}%"></div></div>
+        ${fmtP(p)}
+      </div></td>
+    </tr>`;
+  }).join('');
+  const top10=sites.slice(0,10);
+  const lbs=top10.map(s=>s.site.name.length>18?s.site.name.slice(0,16)+'…':s.site.name);
+  mkChart('ch-site-kwh','bar',lbs,[{label:'kWh/Day',data:top10.map(s=>+s.kwhPerDay.toFixed(1)),backgroundColor:PAL,borderWidth:0}],
+    {indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9499b5',font:{size:10}},grid:{color:'#2d314833'}},y:{ticks:{color:'#9499b5',font:{size:10}},grid:{display:false}}}});
+  mkChart('ch-site-util','bar',lbs,[{label:'Util %',data:top10.map(s=>+(s.utilPct*100).toFixed(1)),
+    backgroundColor:top10.map(s=>s.utilPct>0.2?'#2ecc7188':s.utilPct>0.1?'#f39c1288':'#e74c3c88'),
+    borderColor:top10.map(s=>s.utilPct>0.2?'#2ecc71':s.utilPct>0.1?'#f39c12':'#e74c3c'),borderWidth:1}],
+    {indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#9499b5',font:{size:10},callback:v=>v+'%'},grid:{color:'#2d314833'}},y:{ticks:{color:'#9499b5',font:{size:10}},grid:{display:false}}}});
+  const dk=dailyAgg(charges,c=>c.consumedKwh??0);
+  mkChart('ch-daily-kwh','line',dk.labels,[{label:'kWh',data:dk.data,borderColor:'#6c63ff',backgroundColor:'#6c63ff22',fill:true,tension:.3,pointRadius:0}]);
+  const ds=dailyAgg(charges,()=>1);
+  mkChart('ch-daily-sess','line',ds.labels,[{label:'Sessions',data:ds.data,borderColor:'#00d4aa',backgroundColor:'#00d4aa22',fill:true,tension:.3,pointRadius:0}]);
+}
+
+function renderProfitability(charges,ss,nDays){
+  const kwh=charges.reduce((a,c)=>a+(c.consumedKwh??0),0);
+  const rev=charges.reduce((a,c)=>a+(c.price??0),0);
+  const nCPs=allCPs.length;
+  const p=calcP(rev,kwh,nCPs,nDays);
+  $('pr-kpis').innerHTML=`
+    <div class="kpi"><div class="kpi-label">Gross Revenue</div><div class="kpi-value">${fmtC(rev)}</div><div class="kpi-sub">Total billed</div></div>
+    <div class="kpi"><div class="kpi-label">Total Costs</div><div class="kpi-value red">${fmtC(p.tc)}</div><div class="kpi-sub">Elec + Share + Ops</div></div>
+    <div class="kpi"><div class="kpi-label">Net Profit</div><div class="kpi-value ${p.profit>=0?'green':'red'}">${fmtC(p.profit)}</div><div class="kpi-sub">${fmtP(p.margin)} margin</div></div>
+    <div class="kpi"><div class="kpi-label">Electricity Cost</div><div class="kpi-value yellow">${fmtC(p.ec)}</div><div class="kpi-sub">${fmtK(kwh)} kWh × $${costs().elec}</div></div>
+  `;
+  mkChart('ch-cost-donut','doughnut',['Electricity','Rev Share','Operations','Net Profit'],
+    [{data:[p.ec,p.sc,p.oc,Math.max(0,p.profit)],backgroundColor:['#e74c3c','#f39c12','#3498db','#2ecc71'],borderWidth:0}],
+    {plugins:{legend:{position:'right',labels:{color:'#9499b5',font:{size:11}}}}});
+  const mm={};
+  charges.forEach(c=>{const d=(c.startedAt||c.createdAt||'').slice(0,7);if(!d)return;if(!mm[d])mm[d]={rev:0,kwh:0};mm[d].rev+=c.price??0;mm[d].kwh+=c.consumedKwh??0;});
+  const mk=Object.keys(mm).sort();
+  const mpArr=mk.map(k=>calcP(mm[k].rev,mm[k].kwh,nCPs,30.44).profit);
+  mkChart('ch-monthly-profit','bar',mk,[{label:'Monthly Profit',data:mpArr,
+    backgroundColor:mpArr.map(v=>v>=0?'#2ecc7188':'#e74c3c88'),
+    borderColor:mpArr.map(v=>v>=0?'#2ecc71':'#e74c3c'),borderWidth:1}]);
+  const sites=Object.values(ss).sort((a,b)=>b.profit.profit-a.profit.profit);
+  $('tb-site-profit').innerHTML=sites.map(s=>{
+    const pp=s.profit;
+    return `<tr>
+      <td><strong>${s.site.name}</strong></td>
+      <td>${fmtC(s.revenue)}</td>
+      <td class="red">${fmtC(pp.ec)}</td>
+      <td class="yellow">${fmtC(pp.sc)}</td>
+      <td class="blue">${fmtC(pp.oc)}</td>
+      <td class="${pp.profit>=0?'green':'red'}" style="font-weight:700">${fmtC(pp.profit)}</td>
+      <td><span class="badge ${pp.margin>=0.3?'bg':pp.margin>=0?'by':'br'}">${fmtP(pp.margin)}</span></td>
+    </tr>`;
+  }).join('');
+  const cps=cpStats(charges,allCPs);
+  const cpRows=Object.values(cps).filter(s=>s.sessions>0).sort((a,b)=>b.revenue-a.revenue).slice(0,30);
+  $('tb-cp-profit').innerHTML=cpRows.map(s=>{
+    const pp=calcP(s.revenue,s.kwh,1,nDays);
+    const site=siteMap[s.siteId]?.name||s.siteId;
+    return `<tr>
+      <td style="color:var(--text2);font-size:11px">${s.cp?.id||'—'}</td>
+      <td>${site}</td>
+      <td>${s.cp?.maxKw??s.cp?.maxKW??'—'}</td>
+      <td>${s.sessions}</td>
+      <td>${fmt(s.kwh)}</td>
+      <td>${fmtC(s.revenue)}</td>
+      <td class="red">${fmtC(pp.tc)}</td>
+      <td class="${pp.profit>=0?'green':'red'}" style="font-weight:600">${fmtC(pp.profit)}</td>
+      <td><span class="badge ${pp.margin>=0.3?'bg':pp.margin>=0?'by':'br'}">${fmtP(pp.margin)}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPayout(charges,ss,nDays){
+  const kwh=charges.reduce((a,c)=>a+(c.consumedKwh??0),0);
+  const rev=charges.reduce((a,c)=>a+(c.price??0),0);
+  const nCPs=allCPs.length;
+  const p=calcP(rev,kwh,nCPs,nDays);
+  const{elec,share,ops}=costs();
+  $('po-kpis').innerHTML=`
+    <div class="kpi"><div class="kpi-label">Gross Revenue</div><div class="kpi-value">${fmtC(rev)}</div><div class="kpi-sub">Total billed</div></div>
+    <div class="kpi"><div class="kpi-label">Owner Payout</div><div class="kpi-value yellow">${fmtC(p.sc)}</div><div class="kpi-sub">${fmtK(kwh)} kWh × $${share}</div></div>
+    <div class="kpi"><div class="kpi-label">Electricity Cost</div><div class="kpi-value red">${fmtC(p.ec)}</div><div class="kpi-sub">${fmtK(kwh)} kWh × $${elec}</div></div>
+    <div class="kpi"><div class="kpi-label">Operating Cost</div><div class="kpi-value blue">${fmtC(p.oc)}</div><div class="kpi-sub">$${ops}/mo × ${nCPs} chargers</div></div>
+    <div class="kpi"><div class="kpi-label">Net to You</div><div class="kpi-value ${p.profit>=0?'green':'red'}">${fmtC(p.profit)}</div><div class="kpi-sub">${fmtP(p.margin)} margin</div></div>
+  `;
+  const mm={};
+  charges.forEach(c=>{const d=(c.startedAt||c.createdAt||'').slice(0,7);if(!d)return;if(!mm[d])mm[d]={rev:0,kwh:0};mm[d].rev+=c.price??0;mm[d].kwh+=c.consumedKwh??0;});
+  const mk=Object.keys(mm).sort();
+  mkChart('ch-rev-trend','line',mk,[
+    {label:'Revenue',data:mk.map(k=>mm[k].rev),borderColor:'#2ecc71',backgroundColor:'#2ecc7122',fill:true,tension:.3,pointRadius:2},
+    {label:'Elec+Share',data:mk.map(k=>mm[k].kwh*(elec+share)),borderColor:'#e74c3c',backgroundColor:'#e74c3c11',fill:true,tension:.3,pointRadius:2},
+    {label:'Net Profit',data:mk.map(k=>calcP(mm[k].rev,mm[k].kwh,nCPs,30.44).profit),borderColor:'#6c63ff',tension:.3,pointRadius:2,borderDash:[4,4]},
+  ]);
+  mkChart('ch-rev-donut','doughnut',['Net to You','Owner Payout','Electricity','Operations'],
+    [{data:[Math.max(0,p.profit),p.sc,p.ec,p.oc],backgroundColor:['#2ecc71','#ffa94d','#e74c3c','#3498db'],borderWidth:0}],
+    {plugins:{legend:{position:'right',labels:{color:'#9499b5',font:{size:11}}}}});
+  const sites=Object.values(ss).sort((a,b)=>b.revenue-a.revenue);
+  $('tb-site-payout').innerHTML=sites.map(s=>{
+    const pp=s.profit;
+    return `<tr>
+      <td><strong>${s.site.name}</strong></td>
+      <td style="text-align:center">${s.nCPs}</td>
+      <td>${fmt(s.kwh)} kWh</td>
+      <td>${fmtC(s.revenue)}</td>
+      <td class="yellow">${fmtC(pp.sc)}</td>
+      <td class="red">${fmtC(pp.ec)}</td>
+      <td class="blue">${fmtC(pp.oc)}</td>
+      <td class="${pp.profit>=0?'green':'red'}" style="font-weight:700">${fmtC(pp.profit)}</td>
+    </tr>`;
+  }).join('');
+}
+
+const STATE_COL={available:'#2ecc71',charging:'#6c63ff',faulted:'#e74c3c',unavailable:'#e74c3c',offline:'#95a5a6',unknown:'#95a5a6',occupied:'#ffa94d',reserved:'#ffa94d',preparing:'#ffa94d',finishing:'#00d4aa',suspendedev:'#f39c12',suspendedevse:'#f39c12'};
+const stCol=s=>STATE_COL[(s||'').toLowerCase()]||'#6c63ff';
+
+function initMap(){
+  if(mapReady) return;
+  mapReady=true;
+  mapInst=L.map('map').setView([39.5,-98.35],4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(mapInst);
+  markerGroup=L.featureGroup().addTo(mapInst);
+}
+
+function renderMap(charges){
+  initMap();
+  markerGroup.clearLayers();
+  if(heatLayer){mapInst.removeLayer(heatLayer);heatLayer=null;}
+  const cpc={};
+  charges.forEach(c=>{
+    const id=c.chargePointId;
+    if(!cpc[id]) cpc[id]={kwh:0,sessions:0};
+    cpc[id].kwh+=c.consumedKwh??0;
+    cpc[id].sessions++;
+  });
+  const hpts=[],sideItems=[];
+  let mapped=0;
+  allCPs.forEach(cp=>{
+    const coords=getCoords(cp);
+    if(!coords) return;
+    mapped++;
+    const cc=cpc[cp.id]||{kwh:0,sessions:0};
+    const col=stCol(cp.state||cp.status);
+    hpts.push([coords.lat,coords.lng,Math.log1p(cc.kwh)||0.1]);
+    const m=L.circleMarker([coords.lat,coords.lng],{radius:7,fillColor:col,color:'#fff',weight:1.5,fillOpacity:.85});
+    const site=siteMap[cp.siteId]?.name||`Site ${cp.siteId}`;
+    m.bindPopup(`<div style="font-family:system-ui;min-width:180px">
+      <div style="font-weight:600;margin-bottom:4px">${cp.id}</div>
+      <div style="font-size:12px;color:#666;margin-bottom:6px">${site}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px">
+        <div>Status:</div><div><strong style="color:${col}">${cp.state||cp.status||'—'}</strong></div>
+        <div>Power:</div><div>${cp.maxKw||cp.maxKW||'—'} kW</div>
+        <div>Sessions:</div><div>${cc.sessions}</div>
+        <div>Energy:</div><div>${fmt(cc.kwh)} kWh</div>
+      </div></div>`);
+    markerGroup.addLayer(m);
+    sideItems.push({cp,cc,coords,site,col});
+  });
+  if(hpts.length){
+    const r=parseInt($('heat-r').value)||30;
+    const mx=parseInt($('heat-i').value)||5;
+    heatLayer=L.heatLayer(hpts,{radius:r,maxZoom:15,max:Math.log1p(mx*50),blur:15});
+    if($('heat-tog').checked) heatLayer.addTo(mapInst);
+  }
+  if(!$('mark-tog').checked) mapInst.removeLayer(markerGroup);
+  if(markerGroup.getLayers().length) mapInst.fitBounds(markerGroup.getBounds().pad(.1));
+  sideItems.sort((a,b)=>b.cc.sessions-a.cc.sessions);
+  $('mcp-list').innerHTML=sideItems.map(it=>`
+    <div class="mcp" onclick="mapInst.setView([${it.coords.lat},${it.coords.lng}],15)">
+      <div class="mn">${it.cp.id}</div>
+      <div class="mm">${it.site}</div>
+      <div class="mm" style="color:${it.col}">${it.cp.state||it.cp.status||'—'} · ${it.cc.sessions} sess · ${fmt(it.cc.kwh)} kWh</div>
+    </div>`).join('');
+  $('map-info').textContent=`${mapped} chargers mapped`;
+  setTimeout(()=>mapInst&&mapInst.invalidateSize(),150);
+}
+
+function toggleHeat(){if(!heatLayer)return;$('heat-tog').checked?heatLayer.addTo(mapInst):mapInst.removeLayer(heatLayer);}
+function toggleMarkers(){if(!markerGroup)return;$('mark-tog').checked?markerGroup.addTo(mapInst):mapInst.removeLayer(markerGroup);}
+function updateHeat(){if(!heatLayer)return;heatLayer.setOptions({radius:parseInt($('heat-r').value)||30,max:Math.log1p((parseInt($('heat-i').value)||5)*50)});}
+
+function showTab(name){
+  curTab=name;
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  $('tab-'+name).classList.add('active');
+  const idx=['overview','utilization','profitability','payout','map'].indexOf(name);
+  document.querySelectorAll('nav button')[idx].classList.add('active');
+  if(name==='map') renderMap(filterCharges(allCharges));
+}
+
+function applyFilters(){
+  if(!allCPs.length||!allCharges.length) return;
+  const charges=filterCharges(allCharges);
+  const nDays=getDays();
+  const ss=buildSiteStats(charges,siteMap,nDays);
+  renderOverview(charges);
+  renderUtilization(charges,ss,nDays);
+  renderProfitability(charges,ss,nDays);
+  renderPayout(charges,ss,nDays);
+  if(curTab==='map') renderMap(charges);
+}
+
+async function load(){
+  try{
+    setP(5,'Authenticating...');
+    await auth();
+    setP(15,'Loading charge points...');
+    allCPs=await fetchAll('/charge-points',{},(n,t)=>setP(15+Math.round(n/(t||100)*20),`Charge points: ${n}/${t||'?'}`));
+    setP(40,'Building site map...');
+    siteMap=buildSiteMap(allCPs);
+    setP(45,'Loading charge sessions...');
+    allCharges=await fetchAll('/charges',{},(n,t)=>setP(45+Math.round(n/(t||3000)*50),`Sessions: ${n}/${t||'?'}`));
+    setP(98,'Rendering...');
+    applyFilters();
+    $('overlay').style.display='none';
+    setSt(`${allCPs.length} chargers · ${allCharges.length} sessions`,'ok');
+  }catch(e){
+    $('overlay').style.display='none';
+    const eb=$('err');eb.textContent='⚠ '+e.message;eb.style.display='block';
+    setSt('Error: '+e.message,'error');
+    console.error(e);
+  }
+}
+
+load();
+</script>
+</body>
+</html>
