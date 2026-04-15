@@ -1,7 +1,7 @@
 /**
  * /api/data — Shared Monta data cache
  *
- * GET /api/data           → return KV-cached data (or fetch fresh if stale)
+ * GET /api/data           → return KV-cached data (or fetch fresh if unavailable)
  * GET /api/data?refresh=1 → force re-fetch from Monta, update KV cache
  *
  * Required environment variables (set in Vercel dashboard):
@@ -11,11 +11,13 @@
  * Required Vercel add-on (free tier works):
  *   Vercel KV — provision at vercel.com/dashboard → Storage → Create KV Database
  *   (env vars KV_URL, KV_REST_API_URL, KV_REST_API_TOKEN are auto-set after linking)
+ *
+ * Visit /api/debug to check KV status and cache contents.
  */
 
 const MONTA_API = 'https://partner-api.monta.com/api/v1';
 const CACHE_KEY = 'monta_dashboard_v1';
-// No TTL — data persists in KV until manually refreshed via ?refresh=1 shared cache
+// No TTL — data persists in KV until manually refreshed via ?refresh=1
 
 // ---- Monta API helpers ----
 
@@ -74,24 +76,16 @@ async function fetchFromMonta() {
   return { cps, charges, sites, fetchedAt: Date.now() };
 }
 
-// ---- KV helpers (gracefully degrade if KV not provisioned) ----
+// ---- KV helpers ----
 
 async function kvGet(key) {
-  try {
-    const { kv } = await import('@vercel/kv');
-    return await kv.get(key);
-  } catch {
-    return null;
-  }
+  const { kv } = await import('@vercel/kv');
+  return await kv.get(key);
 }
 
 async function kvSet(key, value) {
-  try {
-    const { kv } = await import('@vercel/kv');
-    await kv.set(key, value); // no TTL — persists until manual refresh
-  } catch {
-    // KV not configured — no-op, will re-fetch next request
-  }
+  const { kv } = await import('@vercel/kv');
+  await kv.set(key, value); // no TTL — persists until manual refresh
 }
 
 // ---- Handler ----
@@ -107,38 +101,55 @@ export default async function handler(req, res) {
 
   const forceRefresh = req.query.refresh === '1';
 
-  try {
-    // Return cached data if available and not forcing refresh
-    if (!forceRefresh) {
+  // ---- Try KV cache first ----
+  let kvError = null;
+  if (!forceRefresh) {
+    try {
       const cached = await kvGet(CACHE_KEY);
       if (cached) {
         res.setHeader('X-Cache', 'HIT');
         res.setHeader('X-Fetched-At', String(cached.fetchedAt));
         return res.status(200).json(cached);
       }
+      // KV connected but no data yet
+      res.setHeader('X-Cache', 'MISS');
+    } catch (err) {
+      kvError = err.message;
+      console.error('[api/data] KV read error:', err.message);
+      res.setHeader('X-Cache', 'KV-ERROR');
+      res.setHeader('X-KV-Error', err.message);
+      // Fall through to Monta fetch
+    }
+  }
+
+  // ---- Fetch fresh from Monta ----
+  try {
+    const data = await fetchFromMonta();
+
+    // Save to KV (non-fatal if it fails)
+    try {
+      await kvSet(CACHE_KEY, data);
+    } catch (err) {
+      console.error('[api/data] KV write error:', err.message);
+      res.setHeader('X-KV-Write-Error', err.message);
     }
 
-    // Fetch fresh data from Monta
-    const data = await fetchFromMonta();
-    await kvSet(CACHE_KEY, data);
-
-    res.setHeader('X-Cache', 'MISS');
     res.setHeader('X-Fetched-At', String(data.fetchedAt));
     return res.status(200).json(data);
 
   } catch (err) {
-    console.error('[api/data] Error:', err);
+    console.error('[api/data] Monta fetch error:', err.message);
 
-    // On refresh failure, try to return stale cache rather than erroring out
-    if (forceRefresh) {
+    // Last resort: return stale cache even if forceRefresh was requested
+    try {
       const stale = await kvGet(CACHE_KEY);
       if (stale) {
         res.setHeader('X-Cache', 'STALE');
         res.setHeader('X-Fetched-At', String(stale.fetchedAt));
         return res.status(200).json({ ...stale, stale: true, staleReason: err.message });
       }
-    }
+    } catch {}
 
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message, kvError });
   }
 }
