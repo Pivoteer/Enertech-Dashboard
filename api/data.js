@@ -67,10 +67,15 @@ async function fetchAll(token, path, params = {}) {
 
 async function fetchFromMonta() {
   const token = await montaAuth();
+
+  // Only fetch charges from the last 90 days — full history can exceed the 1 MB
+  // Upstash REST API limit and slows down the fetch significantly.
+  const from = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
   // Fetch all three in parallel; sites gracefully falls back to [] if unavailable
   const [cps, charges, sites] = await Promise.all([
     fetchAll(token, '/charge-points'),
-    fetchAll(token, '/charges'),
+    fetchAll(token, '/charges', { from }),
     fetchAll(token, '/sites').catch(() => []),
   ]);
   return { cps, charges, sites, fetchedAt: Date.now() };
@@ -154,15 +159,18 @@ export default async function handler(req, res) {
     const data = await fetchFromMonta();
 
     // Save to KV (non-fatal if it fails)
+    let kvWriteError = null;
     try {
       await kvSet(CACHE_KEY, data);
     } catch (err) {
+      kvWriteError = err.message;
       console.error('[api/data] KV write error:', err.message);
       res.setHeader('X-KV-Write-Error', err.message);
     }
 
     res.setHeader('X-Fetched-At', String(data.fetchedAt));
-    return res.status(200).json(data);
+    // Include kvWriteError in response so callers can surface it (null = success)
+    return res.status(200).json({ ...data, kvWriteError });
 
   } catch (err) {
     console.error('[api/data] Monta fetch error:', err.message);

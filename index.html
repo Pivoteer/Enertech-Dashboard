@@ -357,6 +357,7 @@ async function forceRefresh(){
     if(!r.ok) throw new Error(`Server error ${r.status}`);
     const data=await r.json();
     if(data.error) throw new Error(data.error);
+    if(data.kvWriteError) console.warn('[cache] KV write failed:',data.kvWriteError);
     allCPs=data.cps;allCharges=data.charges;allSites=data.sites||[];
     siteMap=buildSiteMap(allCPs,allSites);
     saveL1(allCPs,allCharges,allSites,data.fetchedAt);
