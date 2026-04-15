@@ -15,7 +15,7 @@
 
 const MONTA_API = 'https://partner-api.monta.com/api/v1';
 const CACHE_KEY = 'monta_dashboard_v1';
-const CACHE_TTL_SECONDS = 3600; // 1 hour shared cache
+// No TTL — data persists in KV until manually refreshed via ?refresh=1 shared cache
 
 // ---- Monta API helpers ----
 
@@ -84,10 +84,10 @@ async function kvGet(key) {
   }
 }
 
-async function kvSet(key, value, ttlSeconds) {
+async function kvSet(key, value) {
   try {
     const { kv } = await import('@vercel/kv');
-    await kv.set(key, value, { ex: ttlSeconds });
+    await kv.set(key, value); // no TTL — persists until manual refresh
   } catch {
     // KV not configured — no-op, will re-fetch next request
   }
@@ -119,7 +119,7 @@ export default async function handler(req, res) {
 
     // Fetch fresh data from Monta
     const data = await fetchFromMonta();
-    await kvSet(CACHE_KEY, data, CACHE_TTL_SECONDS);
+    await kvSet(CACHE_KEY, data);
 
     res.setHeader('X-Cache', 'MISS');
     res.setHeader('X-Fetched-At', String(data.fetchedAt));

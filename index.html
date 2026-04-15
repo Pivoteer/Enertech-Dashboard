@@ -319,15 +319,26 @@ function loadL1(){
 }
 function clearL1(){localStorage.removeItem(L1_KEY);}
 
+function fmtAge(fetchedAt){
+  if(!fetchedAt) return '';
+  const ms=Date.now()-fetchedAt;
+  const min=Math.round(ms/60000);
+  if(min<1) return 'just now';
+  if(min<60) return `${min}m ago`;
+  const hrs=Math.round(ms/3600000);
+  if(hrs<24) return `${hrs}h ago`;
+  const days=Math.round(ms/86400000);
+  return `${days}d ago`;
+}
 function updateCacheInfo(source,fetchedAt){
   const el=$('cache-info');if(!el)return;
-  const ageMin=fetchedAt?Math.round((Date.now()-fetchedAt)/60000):null;
-  const ageStr=ageMin!==null?(ageMin<1?'just now':`${ageMin}m ago`):'';
+  const age=fmtAge(fetchedAt);
   if(source==='l1'){
-    el.innerHTML=`<span style="color:var(--accent2)">● Browser cache</span> · ${ageStr}`;
+    el.innerHTML=`<span style="color:var(--accent2)">● Cached</span> · data from ${age}`;
   } else if(source==='server'){
-    const col=ageMin<30?'var(--green)':ageMin<60?'var(--yellow)':'var(--red)';
-    el.innerHTML=`<span style="color:${col}">● Server cache</span> · ${ageStr}`;
+    const ms=fetchedAt?Date.now()-fetchedAt:0;
+    const col=ms<3600000?'var(--green)':ms<86400000?'var(--yellow)':'var(--red)';
+    el.innerHTML=`<span style="color:${col}">● Cached</span> · data from ${age}`;
   } else {
     el.innerHTML=`<span style="color:var(--green)">● Live from Monta</span>`;
   }
