@@ -18,19 +18,28 @@ export default async function handler(req, res) {
     kv: { status: 'unknown', error: null },
     cache: { exists: false, ageMinutes: null, counts: null },
     env: {
-      hasKvUrl: !!process.env.KV_URL,
-      hasKvRestUrl: !!process.env.KV_REST_API_URL,
-      hasKvToken: !!process.env.KV_REST_API_TOKEN,
+      hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+      hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+      hasKvRestUrl: !!process.env.KV_REST_API_URL,   // legacy fallback
+      hasKvToken: !!process.env.KV_REST_API_TOKEN,   // legacy fallback
       hasMontaClientId: !!process.env.MONTA_CLIENT_ID,
       hasMontaClientSecret: !!process.env.MONTA_CLIENT_SECRET,
     },
   };
 
+  const kvBaseUrl = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '').replace(/\/$/, '');
+  const kvToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '';
+
   try {
-    const { kv } = await import('@vercel/kv');
+    if (!kvBaseUrl || !kvToken) throw new Error('Missing KV env vars (need UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN)');
     report.kv.status = 'connected';
 
-    const cached = await kv.get(CACHE_KEY);
+    const raw = await fetch(`${kvBaseUrl}/get/${encodeURIComponent(CACHE_KEY)}`, {
+      headers: { Authorization: `Bearer ${kvToken}` },
+    });
+    if (!raw.ok) throw new Error(`KV GET ${raw.status}: ${await raw.text()}`);
+    const { result } = await raw.json();
+    const cached = result ? (typeof result === 'string' ? JSON.parse(result) : result) : null;
     if (cached) {
       const ageMs = Date.now() - (cached.fetchedAt || 0);
       report.cache = {

@@ -76,16 +76,40 @@ async function fetchFromMonta() {
   return { cps, charges, sites, fetchedAt: Date.now() };
 }
 
-// ---- KV helpers ----
+// ---- KV helpers (Upstash REST API — no package dependency) ----
+
+function upstashUrl() {
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  if (!url) throw new Error('Missing UPSTASH_REDIS_REST_URL env var');
+  return url.replace(/\/$/, '');
+}
+
+function upstashToken() {
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  if (!token) throw new Error('Missing UPSTASH_REDIS_REST_TOKEN env var');
+  return token;
+}
 
 async function kvGet(key) {
-  const { kv } = await import('@vercel/kv');
-  return await kv.get(key);
+  const r = await fetch(`${upstashUrl()}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${upstashToken()}` },
+  });
+  if (!r.ok) throw new Error(`KV GET failed ${r.status}: ${await r.text()}`);
+  const { result } = await r.json();
+  if (result === null) return null;
+  return typeof result === 'string' ? JSON.parse(result) : result;
 }
 
 async function kvSet(key, value) {
-  const { kv } = await import('@vercel/kv');
-  await kv.set(key, value); // no TTL — persists until manual refresh
+  const r = await fetch(`${upstashUrl()}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${upstashToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(JSON.stringify(value)), // double-stringify: outer for fetch body, inner stored as string
+  });
+  if (!r.ok) throw new Error(`KV SET failed ${r.status}: ${await r.text()}`);
 }
 
 // ---- Handler ----
