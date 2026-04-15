@@ -1,5 +1,7 @@
 {
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/monta-dashboard.html" }
-  ]
+  "functions": {
+    "api/data.js": {
+      "maxDuration": 60
+    }
+  }
 }
