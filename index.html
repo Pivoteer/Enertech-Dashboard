@@ -1254,19 +1254,20 @@ function showTab(name){
 }
 
 // ============ APPLY FILTERS ============
+function safeRender(name,fn){try{fn();}catch(e){console.error('[render] '+name+' failed:',e);}}
 function applyFilters(){
   if(!allCPs.length||!allCharges.length) return;
   const charges=filterCharges(allCharges);
   const nDays=getDays();
   const ss=buildSiteStats(charges,siteMap,nDays);
-  renderOverview(charges);
-  renderUtilization(charges,ss,nDays);
-  if(selectedSiteId) renderSites();
-  renderFailedCharges(charges);
-  renderProfitability(charges,ss,nDays);
-  renderPayout(charges,ss,nDays);
-  renderUsers(charges);
-  if(curTab==='map') renderMap(charges);
+  safeRender('overview',()=>renderOverview(charges));
+  safeRender('utilization',()=>renderUtilization(charges,ss,nDays));
+  if(selectedSiteId) safeRender('sites',()=>renderSites());
+  safeRender('failed',()=>renderFailedCharges(charges));
+  safeRender('profitability',()=>renderProfitability(charges,ss,nDays));
+  safeRender('payout',()=>renderPayout(charges,ss,nDays));
+  safeRender('users',()=>renderUsers(charges));
+  if(curTab==='map') safeRender('map',()=>renderMap(charges));
 }
 
 // ============ LOAD ============

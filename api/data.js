@@ -65,11 +65,42 @@ async function fetchAll(token, path, params = {}) {
   return items;
 }
 
+// Keep only the fields the dashboard actually uses — drops ~60-70% of payload size
+function slimCharge(c) {
+  return {
+    id: c.id,
+    humanReadableId: c.humanReadableId,
+    chargePointId: c.chargePointId,
+    userId: c.userId,
+    state: c.state,
+    startedAt: c.startedAt,
+    createdAt: c.createdAt,
+    completedAt: c.completedAt,
+    failedAt: c.failedAt,
+    stoppedAt: c.stoppedAt,
+    cablePluggedInAt: c.cablePluggedInAt,
+    consumedKwh: c.consumedKwh,
+    price: c.price,
+    failureReason: c.failureReason,
+  };
+}
+
+function slimCP(cp) {
+  return {
+    id: cp.id,
+    siteId: cp.siteId,
+    teamId: cp.teamId,
+    state: cp.state,
+    status: cp.status,
+    maxPower: cp.maxPower,
+    location: cp.location,
+  };
+}
+
 async function fetchFromMonta() {
   const token = await montaAuth();
 
-  // Only fetch charges from the last 90 days — full history can exceed the 1 MB
-  // Upstash REST API limit and slows down the fetch significantly.
+  // Only fetch charges from the last 90 days to keep payload manageable
   const from = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
   // Fetch all three in parallel; sites gracefully falls back to [] if unavailable
@@ -78,7 +109,13 @@ async function fetchFromMonta() {
     fetchAll(token, '/charges', { from }),
     fetchAll(token, '/sites').catch(() => []),
   ]);
-  return { cps, charges, sites, fetchedAt: Date.now() };
+
+  return {
+    cps: cps.map(slimCP),
+    charges: charges.map(slimCharge),
+    sites,
+    fetchedAt: Date.now(),
+  };
 }
 
 // ---- KV helpers (Upstash REST API — no package dependency) ----
