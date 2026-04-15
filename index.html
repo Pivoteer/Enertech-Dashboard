@@ -122,6 +122,7 @@ tr:hover td{background:var(--card2)}
     <button onclick="showTab('failed')">Failed Charges</button>
     <button onclick="showTab('profitability')">Profitability</button>
     <button onclick="showTab('payout')">Revenue Payout</button>
+    <button onclick="showTab('users')">Users</button>
     <button onclick="showTab('map')">Map &amp; Heat Map</button>
   </nav>
 
@@ -264,6 +265,33 @@ tr:hover td{background:var(--card2)}
         <h3>Site-Level Payout Summary</h3>
         <table><thead><tr><th>Site</th><th>Chargers</th><th>kWh</th><th>Gross Revenue</th><th>Owner Payout</th><th>Elec Cost</th><th>Ops Cost</th><th>Net to You</th></tr></thead>
         <tbody id="tb-site-payout"></tbody></table>
+      </div>
+    </div>
+
+    <!-- USERS -->
+    <div class="tab-panel" id="tab-users">
+      <div class="kpi-row kpi-4" id="usr-kpis"></div>
+      <div class="charts-row c2b">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="chart-card"><h3>Sessions — New vs Repeat</h3><canvas id="ch-usr-sessions"></canvas></div>
+          <div class="chart-card"><h3>Revenue — New vs Repeat</h3><canvas id="ch-usr-revenue"></canvas></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="chart-card"><h3>New Users Per Week</h3><canvas id="ch-usr-new-trend"></canvas></div>
+          <div class="chart-card"><h3>Failure Rate — New vs Repeat</h3><canvas id="ch-usr-fail"></canvas></div>
+        </div>
+      </div>
+      <div class="charts-row c2b">
+        <div class="table-card" style="max-height:340px">
+          <h3>Top Repeat Users (by Sessions)</h3>
+          <table><thead><tr><th>User</th><th>First Seen</th><th>Sessions</th><th>kWh</th><th>Revenue</th><th>Failed</th><th>Fail Rate</th></tr></thead>
+          <tbody id="tb-usr-repeat"></tbody></table>
+        </div>
+        <div class="table-card" style="max-height:340px">
+          <h3>New Users This Period</h3>
+          <table><thead><tr><th>User</th><th>First Charge</th><th>Sessions</th><th>kWh</th><th>Revenue</th><th>Failed</th></tr></thead>
+          <tbody id="tb-usr-new"></tbody></table>
+        </div>
       </div>
     </div>
 
@@ -1087,8 +1115,130 @@ function toggleHeat(){if(!heatLayer)return;$('heat-tog').checked?heatLayer.addTo
 function toggleMarkers(){if(!markerGroup)return;$('mark-tog').checked?markerGroup.addTo(mapInst):mapInst.removeLayer(markerGroup);}
 function updateHeat(){if(!heatLayer)return;heatLayer.setOptions({radius:parseInt($('heat-r').value)||30,max:Math.log1p((parseInt($('heat-i').value)||5)*50)});}
 
+// ============ RENDER: USERS ============
+function renderUsers(periodCharges){
+  // Build first-ever charge date per user across ALL history (not just filtered period)
+  const firstSeen={};
+  allCharges.forEach(c=>{
+    const uid=c.userId;
+    if(!uid) return;
+    const d=new Date(c.startedAt||c.createdAt);
+    if(!firstSeen[uid]||d<firstSeen[uid]) firstSeen[uid]=d;
+  });
+
+  const{from}=getRange();
+
+  // Classify each charge in the period
+  const newCharges=[],repeatCharges=[],anonCharges=[];
+  periodCharges.forEach(c=>{
+    if(!c.userId){anonCharges.push(c);return;}
+    const fs=firstSeen[c.userId];
+    (fs&&fs>=from?newCharges:repeatCharges).push(c);
+  });
+
+  const newUsers=new Set(newCharges.map(c=>c.userId)).size;
+  const repeatUsers=new Set(repeatCharges.map(c=>c.userId)).size;
+  const totalUsers=new Set(periodCharges.filter(c=>c.userId).map(c=>c.userId)).size;
+
+  const sumKwh=arr=>arr.reduce((a,c)=>a+(c.consumedKwh??0),0);
+  const sumRev=arr=>arr.reduce((a,c)=>a+(c.price??0),0);
+  const failN=arr=>arr.filter(isFailedCharge).length;
+
+  // KPIs
+  $('usr-kpis').innerHTML=`
+    <div class="kpi"><div class="kpi-label">Total Unique Users</div><div class="kpi-value">${totalUsers}</div><div class="kpi-sub">${anonCharges.length} anonymous sessions</div></div>
+    <div class="kpi"><div class="kpi-label">New Users</div><div class="kpi-value green">${newUsers}</div><div class="kpi-sub">${newCharges.length} sessions · ${fmtC(sumRev(newCharges))}</div></div>
+    <div class="kpi"><div class="kpi-label">Repeat Users</div><div class="kpi-value">${repeatUsers}</div><div class="kpi-sub">${repeatCharges.length} sessions · ${fmtC(sumRev(repeatCharges))}</div></div>
+    <div class="kpi"><div class="kpi-label">Repeat Rate</div><div class="kpi-value">${totalUsers>0?fmt(repeatUsers/totalUsers*100,1):'—'}%</div><div class="kpi-sub">${totalUsers>0?fmt(repeatCharges.length/Math.max(periodCharges.length,1)*100,1):'—'}% of sessions</div></div>
+  `;
+
+  // Sessions donut
+  mkChart('ch-usr-sessions','doughnut',['New','Repeat','Anonymous'],[{
+    data:[newCharges.length,repeatCharges.length,anonCharges.length],
+    backgroundColor:['#00d4aa','#6c63ff','#888'],borderWidth:0
+  }],{plugins:{legend:{position:'right',labels:{color:'#9499b5',font:{size:11}}}}});
+
+  // Revenue donut
+  mkChart('ch-usr-revenue','doughnut',['New','Repeat','Anonymous'],[{
+    data:[sumRev(newCharges),sumRev(repeatCharges),sumRev(anonCharges)].map(v=>+v.toFixed(2)),
+    backgroundColor:['#00d4aa','#6c63ff','#888'],borderWidth:0
+  }],{plugins:{legend:{position:'right',labels:{color:'#9499b5',font:{size:11}}}}});
+
+  // New users per week trend
+  const weekNew={};
+  newCharges.forEach(c=>{
+    const d=new Date(c.startedAt||c.createdAt);
+    const mon=new Date(d);mon.setDate(d.getDate()-d.getDay()+1);
+    const wk=mon.toISOString().slice(0,10);
+    if(!weekNew[wk]) weekNew[wk]=new Set();
+    weekNew[wk].add(c.userId);
+  });
+  const wkLabels=Object.keys(weekNew).sort();
+  mkChart('ch-usr-new-trend','bar',wkLabels,[{
+    label:'New Users',data:wkLabels.map(w=>weekNew[w].size),
+    backgroundColor:'#00d4aa88',borderColor:'#00d4aa',borderWidth:1
+  }]);
+
+  // Failure rate comparison bar
+  const newFail=failN(newCharges),repFail=failN(repeatCharges);
+  const newFailRate=newCharges.length>0?newFail/newCharges.length*100:0;
+  const repFailRate=repeatCharges.length>0?repFail/repeatCharges.length*100:0;
+  mkChart('ch-usr-fail','bar',['New Users','Repeat Users'],[{
+    label:'Fail Rate %',data:[+newFailRate.toFixed(2),+repFailRate.toFixed(2)],
+    backgroundColor:['#e74c3c88','#ffa94d88'],borderColor:['#e74c3c','#ffa94d'],borderWidth:1
+  }],{scales:{y:{ticks:{callback:v=>v+'%'}}}});
+
+  // Build per-user stats for repeat users table
+  const repStats={};
+  repeatCharges.forEach(c=>{
+    const uid=c.userId;
+    if(!repStats[uid]) repStats[uid]={uid,sessions:0,kwh:0,rev:0,failed:0,first:firstSeen[uid]};
+    repStats[uid].sessions++;
+    repStats[uid].kwh+=c.consumedKwh??0;
+    repStats[uid].rev+=c.price??0;
+    if(isFailedCharge(c)) repStats[uid].failed++;
+  });
+  const topRepeat=Object.values(repStats).sort((a,b)=>b.sessions-a.sessions).slice(0,30);
+  $('tb-usr-repeat').innerHTML=topRepeat.length?topRepeat.map(u=>{
+    const mask='…'+String(u.uid).slice(-6);
+    const fr=u.sessions>0?fmt(u.failed/u.sessions*100,1)+'%':'—';
+    return`<tr>
+      <td style="color:var(--text2);font-family:monospace;font-size:11px">${mask}</td>
+      <td>${u.first?u.first.toISOString().slice(0,10):'—'}</td>
+      <td>${u.sessions}</td>
+      <td>${fmt(u.kwh)}</td>
+      <td>${fmtC(u.rev)}</td>
+      <td style="color:${u.failed>0?'var(--red)':'var(--text2)'}">${u.failed}</td>
+      <td style="color:${u.failed/u.sessions>.1?'var(--red)':'var(--green)'}">${fr}</td>
+    </tr>`;
+  }).join(''):'<tr><td colspan="7" style="color:var(--text2);text-align:center;padding:16px">No repeat users in this period</td></tr>';
+
+  // New users table
+  const newStats={};
+  newCharges.forEach(c=>{
+    const uid=c.userId;
+    if(!newStats[uid]) newStats[uid]={uid,sessions:0,kwh:0,rev:0,failed:0,first:firstSeen[uid]};
+    newStats[uid].sessions++;
+    newStats[uid].kwh+=c.consumedKwh??0;
+    newStats[uid].rev+=c.price??0;
+    if(isFailedCharge(c)) newStats[uid].failed++;
+  });
+  const newList=Object.values(newStats).sort((a,b)=>b.sessions-a.sessions).slice(0,30);
+  $('tb-usr-new').innerHTML=newList.length?newList.map(u=>{
+    const mask='…'+String(u.uid).slice(-6);
+    return`<tr>
+      <td style="color:var(--text2);font-family:monospace;font-size:11px">${mask}</td>
+      <td>${u.first?u.first.toISOString().slice(0,10):'—'}</td>
+      <td>${u.sessions}</td>
+      <td>${fmt(u.kwh)}</td>
+      <td>${fmtC(u.rev)}</td>
+      <td style="color:${u.failed>0?'var(--red)':'var(--text2)'}">${u.failed}</td>
+    </tr>`;
+  }).join(''):'<tr><td colspan="6" style="color:var(--text2);text-align:center;padding:16px">No new users in this period</td></tr>';
+}
+
 // ============ TAB SWITCHING ============
-const TAB_ORDER=['overview','utilization','sites','failed','profitability','payout','map'];
+const TAB_ORDER=['overview','utilization','sites','failed','profitability','payout','users','map'];
 function showTab(name){
   curTab=name;
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
@@ -1112,6 +1262,7 @@ function applyFilters(){
   renderFailedCharges(charges);
   renderProfitability(charges,ss,nDays);
   renderPayout(charges,ss,nDays);
+  renderUsers(charges);
   if(curTab==='map') renderMap(charges);
 }
 
