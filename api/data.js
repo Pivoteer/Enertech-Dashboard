@@ -65,12 +65,13 @@ async function fetchAll(token, path, params = {}) {
 
 async function fetchFromMonta() {
   const token = await montaAuth();
-  // Fetch charge points and charges in parallel
-  const [cps, charges] = await Promise.all([
+  // Fetch all three in parallel; sites gracefully falls back to [] if unavailable
+  const [cps, charges, sites] = await Promise.all([
     fetchAll(token, '/charge-points'),
     fetchAll(token, '/charges'),
+    fetchAll(token, '/sites').catch(() => []),
   ]);
-  return { cps, charges, fetchedAt: Date.now() };
+  return { cps, charges, sites, fetchedAt: Date.now() };
 }
 
 // ---- KV helpers (gracefully degrade if KV not provisioned) ----

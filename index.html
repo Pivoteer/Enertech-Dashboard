@@ -227,7 +227,7 @@ tr:hover td{background:var(--card2)}
       </div>
       <div class="table-card" style="max-height:340px">
         <h3>Recent Failed Charges</h3>
-        <table><thead><tr><th>ID</th><th>Site</th><th>Charger</th><th>Time</th><th>State</th><th>kWh</th><th>Est. Lost</th></tr></thead>
+        <table><thead><tr><th>ID</th><th>Site</th><th>Charger</th><th>Time</th><th>Failure Reason</th><th>kWh</th><th>Est. Lost</th></tr></thead>
         <tbody id="tb-fail-recent"></tbody></table>
       </div>
     </div>
@@ -292,7 +292,7 @@ tr:hover td{background:var(--card2)}
 const L1_KEY='enertech_l1_v1';
 const L1_TTL=5*60*1000;
 
-let allCPs=[],allCharges=[],siteMap={};
+let allCPs=[],allCharges=[],allSites=[],siteMap={};
 let charts={},mapInst=null,heatLayer=null,markerGroup=null,mapReady=false;
 let curTab='overview',selectedSiteId=null;
 
@@ -304,8 +304,8 @@ const fmtP=n=>n==null?'—':fmt(n*100,1)+'%';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 // ============ L1 BROWSER CACHE (5 min) ============
-function saveL1(cps,charges,fetchedAt){
-  try{localStorage.setItem(L1_KEY,JSON.stringify({cps,charges,fetchedAt,savedAt:Date.now()}));}
+function saveL1(cps,charges,sites,fetchedAt){
+  try{localStorage.setItem(L1_KEY,JSON.stringify({cps,charges,sites,fetchedAt,savedAt:Date.now()}));}
   catch(e){/* quota — silently skip */}
 }
 function loadL1(){
@@ -349,7 +349,7 @@ async function forceRefresh(){
   $('cache-info').innerHTML=`<span style="color:var(--yellow)">● Refreshing from Monta...</span>`;
   $('refresh-btn').disabled=true;
   $('refresh-btn').textContent='↻ ...';
-  allCPs=[];allCharges=[];siteMap={};selectedSiteId=null;
+  allCPs=[];allCharges=[];allSites=[];siteMap={};selectedSiteId=null;
   $('overlay').style.display='flex';
   setP(10,'Requesting server refresh...');
   try{
@@ -357,13 +357,13 @@ async function forceRefresh(){
     if(!r.ok) throw new Error(`Server error ${r.status}`);
     const data=await r.json();
     if(data.error) throw new Error(data.error);
-    allCPs=data.cps;allCharges=data.charges;
-    siteMap=buildSiteMap(allCPs);
-    saveL1(allCPs,allCharges,data.fetchedAt);
+    allCPs=data.cps;allCharges=data.charges;allSites=data.sites||[];
+    siteMap=buildSiteMap(allCPs,allSites);
+    saveL1(allCPs,allCharges,allSites,data.fetchedAt);
     setP(95,'Rendering...');
     populateSiteSelector();applyFilters();
     $('overlay').style.display='none';
-    setSt(`${allCPs.length} chargers · ${allCharges.length} sessions`,'ok');
+    setSt(`${allCPs.length} chargers · ${allCharges.length} sessions · ${allSites.length} sites`,'ok');
     updateCacheInfo('live',data.fetchedAt);
   }catch(e){
     $('overlay').style.display='none';
@@ -374,10 +374,10 @@ async function forceRefresh(){
 }
 
 // ============ FAILED CHARGE DETECTION ============
-const FAIL_STATES=new Set(['failed','error','aborted','interrupted','faulted','fault']);
+// Per Monta API docs: failed charges always have state="completed" but have
+// failedAt timestamp set and/or failureReason string. There is no separate failed state.
 function isFailedCharge(c){
-  const s=(c.state||c.status||'').toLowerCase();
-  return FAIL_STATES.has(s)||s.includes('fail')||s.includes('error')||s.includes('abort');
+  return c.failedAt!=null||c.failureReason!=null;
 }
 
 // ============ STATUS / PROGRESS ============
@@ -401,14 +401,26 @@ function getCoords(obj){
   }
   return null;
 }
-function buildSiteMap(cps){
+function buildSiteMap(cps,sitesArr=[]){
+  // Build lookup: siteId → real site name from the /sites API
+  const apiSiteNames={};
+  sitesArr.forEach(s=>{if(s.id!=null&&s.name) apiSiteNames[s.id]=s.name;});
+
   const m={};
   cps.forEach(cp=>{
     const sid=cp.siteId||cp.teamId||'unknown';
     if(!m[sid]){
-      const a=cp.location?.address;
-      let name=`Site ${sid}`;
-      if(a){const pts=[a.address1,a.city].filter(Boolean);if(pts.length) name=pts.join(', ');}
+      // Name priority: 1) /sites API name  2) addressLabel  3) address1+city  4) fallback
+      let name=apiSiteNames[cp.siteId]||null;
+      if(!name){
+        const loc=cp.location;
+        name=loc?.addressLabel||null;
+        if(!name){
+          const a=loc?.address;
+          if(a){const pts=[a.address1,a.city].filter(Boolean);if(pts.length) name=pts.join(', ');}
+        }
+      }
+      name=name||`Site ${sid}`;
       m[sid]={id:sid,name,cps:[],coords:getCoords(cp)};
     }
     m[sid].cps.push(cp);
@@ -417,8 +429,9 @@ function buildSiteMap(cps){
   return m;
 }
 function getDurS(c){
+  // Per Monta docs: startedAt → stoppedAt (or completedAt/failedAt if stoppedAt null)
   const start=c.startedAt||c.cablePluggedInAt||c.createdAt;
-  const end=c.stoppedAt||c.completedAt||c.releasedAt||c.updatedAt;
+  const end=c.stoppedAt||c.completedAt||c.failedAt;
   if(start&&end){const diff=(new Date(end)-new Date(start))/1000;if(diff>0&&diff<86400*7) return diff;}
   return 0;
 }
@@ -822,14 +835,23 @@ function renderFailedCharges(charges){
     }
   });
 
-  // Failure state breakdown
-  const byState={};
-  failed.forEach(c=>{const s=c.state||c.status||'unknown';byState[s]=(byState[s]||0)+1;});
-  const stateLabels=Object.keys(byState);
-  if(stateLabels.length>0){
-    mkChart('ch-fail-states','doughnut',stateLabels,[
-      {data:stateLabels.map(k=>byState[k]),backgroundColor:['#e74c3c','#f39c12','#e67e22','#c0392b','#95a5a6','#7f8c8d','#6c63ff'],borderWidth:0}
+  // Failure reason breakdown (extract first segment of failureReason for grouping)
+  const byReason={};
+  failed.forEach(c=>{
+    const r=c.failureReason||'Unknown';
+    // Group by the first meaningful segment (e.g. "Failed to start: Connector unavailable" → "Connector unavailable")
+    const key=r.includes(':')?r.split(':').slice(1).join(':').trim():r;
+    const short=key.length>35?key.slice(0,33)+'…':key;
+    byReason[short]=(byReason[short]||0)+1;
+  });
+  const reasonLabels=Object.keys(byReason).sort((a,b)=>byReason[b]-byReason[a]);
+  if(reasonLabels.length>0){
+    mkChart('ch-fail-states','doughnut',reasonLabels,[
+      {data:reasonLabels.map(k=>byReason[k]),backgroundColor:['#e74c3c','#f39c12','#e67e22','#c0392b','#95a5a6','#7f8c8d','#6c63ff','#3498db'],borderWidth:0}
     ],{plugins:{legend:{position:'right',labels:{color:'#9499b5',font:{size:11}}}}});
+  } else {
+    mkChart('ch-fail-states','doughnut',['No failures'],[{data:[1],backgroundColor:['#2ecc71'],borderWidth:0}],
+      {plugins:{legend:{position:'right',labels:{color:'#9499b5',font:{size:11}}}}});
   }
 
   // Failure rate over time (weekly)
@@ -881,13 +903,16 @@ function renderFailedCharges(charges){
   const recentFailed=[...failed].sort((a,b)=>new Date(b.startedAt||b.createdAt)-new Date(a.startedAt||a.createdAt)).slice(0,30);
   $('tb-fail-recent').innerHTML=recentFailed.length>0?recentFailed.map(c=>{
     const cp=allCPs.find(x=>x.id===c.chargePointId);
-    const site=cp?siteMap[cp.siteId]?.name||'—':'—';
+    const sid=cp?.siteId||cp?.teamId;
+    const site=sid?siteMap[sid]?.name||`Site ${sid}`:'—';
+    const reason=c.failureReason||'—';
+    const shortReason=reason.length>50?reason.slice(0,48)+'…':reason;
     return `<tr>
       <td style="font-size:11px;color:var(--text2)">${c.humanReadableId||c.id}</td>
       <td>${site}</td>
       <td style="font-size:11px;color:var(--text2)">${c.chargePointId||'—'}</td>
-      <td>${(c.startedAt||c.createdAt||'').slice(0,16).replace('T',' ')}</td>
-      <td><span class="badge br">${c.state||c.status||'—'}</span></td>
+      <td>${(c.failedAt||c.createdAt||'').slice(0,16).replace('T',' ')}</td>
+      <td title="${reason}" style="color:var(--red);font-size:11px">${shortReason}</td>
       <td>${fmt(c.consumedKwh??0)}</td>
       <td class="red">${fmtC(avgRevPerSession)}</td>
     </tr>`;
@@ -990,8 +1015,23 @@ function renderPayout(charges,ss,nDays){
 }
 
 // ============ MAP ============
-const STATE_COL={available:'#2ecc71',charging:'#6c63ff',faulted:'#e74c3c',unavailable:'#e74c3c',offline:'#95a5a6',unknown:'#95a5a6',occupied:'#ffa94d',reserved:'#ffa94d',preparing:'#ffa94d',finishing:'#00d4aa',suspendedev:'#f39c12',suspendedevse:'#f39c12'};
-const stCol=s=>STATE_COL[(s||'').toLowerCase()]||'#6c63ff';
+const STATE_COL={
+  'available':'#2ecc71',
+  'busy':'#6c63ff',
+  'busy-charging':'#6c63ff',
+  'busy-non-charging':'#ffa94d',
+  'busy-non-released':'#ffa94d',
+  'busy-blocked':'#f39c12',
+  'busy-reserved':'#ffa94d',
+  'busy-scheduled':'#74c0fc',
+  'error':'#e74c3c',
+  'disconnected':'#95a5a6',
+  'passive':'#9499b5',
+  'maintenance':'#f39c12',
+  'exempt':'#63e6be',
+  'other':'#9499b5',
+};
+const stCol=s=>STATE_COL[(s||'').toLowerCase()]||'#9499b5';
 function initMap(){
   if(mapReady) return;mapReady=true;
   mapInst=L.map('map').setView([39.5,-98.35],4);
@@ -1081,17 +1121,17 @@ async function load(){
     const l1=loadL1();
     if(l1){
       setP(80,'Loading from browser cache...');
-      allCPs=l1.cps;allCharges=l1.charges;
-      siteMap=buildSiteMap(allCPs);
+      allCPs=l1.cps;allCharges=l1.charges;allSites=l1.sites||[];
+      siteMap=buildSiteMap(allCPs,allSites);
       setP(95,'Rendering...');
       populateSiteSelector();applyFilters();
       $('overlay').style.display='none';
-      setSt(`${allCPs.length} chargers · ${allCharges.length} sessions`,'ok');
+      setSt(`${allCPs.length} chargers · ${allCharges.length} sessions · ${allSites.length} sites`,'ok');
       updateCacheInfo('l1',l1.fetchedAt);
       return;
     }
 
-    // L2: server KV cache (1 hr, shared across all users)
+    // L2: server KV cache (shared across all users)
     setP(20,'Fetching data...');
     const r=await fetch('/api/data');
     if(!r.ok){
@@ -1102,14 +1142,14 @@ async function load(){
     const data=await r.json();
     if(data.error) throw new Error(data.error);
 
-    allCPs=data.cps;allCharges=data.charges;
-    siteMap=buildSiteMap(allCPs);
-    saveL1(allCPs,allCharges,data.fetchedAt);
+    allCPs=data.cps;allCharges=data.charges;allSites=data.sites||[];
+    siteMap=buildSiteMap(allCPs,allSites);
+    saveL1(allCPs,allCharges,allSites,data.fetchedAt);
 
     setP(90,'Rendering...');
     populateSiteSelector();applyFilters();
     $('overlay').style.display='none';
-    setSt(`${allCPs.length} chargers · ${allCharges.length} sessions`,'ok');
+    setSt(`${allCPs.length} chargers · ${allCharges.length} sessions · ${allSites.length} sites`,'ok');
     const cacheHeader=r.headers.get('X-Cache');
     const fetchedAt=parseInt(r.headers.get('X-Fetched-At')||data.fetchedAt||Date.now());
     updateCacheInfo(cacheHeader==='HIT'?'server':'live',fetchedAt);
