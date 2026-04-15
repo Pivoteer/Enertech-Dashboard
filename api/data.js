@@ -101,15 +101,18 @@ async function kvGet(key) {
 }
 
 async function kvSet(key, value) {
+  // Upstash REST /set/key expects the raw value as text/plain body
   const r = await fetch(`${upstashUrl()}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${upstashToken()}`,
-      'Content-Type': 'application/json',
+      'Content-Type': 'text/plain',
     },
-    body: JSON.stringify(JSON.stringify(value)), // double-stringify: outer for fetch body, inner stored as string
+    body: JSON.stringify(value),
   });
   if (!r.ok) throw new Error(`KV SET failed ${r.status}: ${await r.text()}`);
+  const resp = await r.json();
+  if (resp.error) throw new Error(`KV SET error: ${resp.error}`);
 }
 
 // ---- Handler ----
