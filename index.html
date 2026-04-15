@@ -1117,6 +1117,9 @@ function updateHeat(){if(!heatLayer)return;heatLayer.setOptions({radius:parseInt
 
 // ============ RENDER: USERS ============
 function renderUsers(periodCharges){
+  // Log a sample charge so we can identify the user field name
+  if(allCharges.length) console.log('[users] sample charge keys:',Object.keys(allCharges[0]),'sample:',allCharges[0]);
+
   // Build first-ever charge date per user across ALL history (not just filtered period)
   const firstSeen={};
   allCharges.forEach(c=>{
