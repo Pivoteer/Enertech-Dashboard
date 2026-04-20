@@ -71,7 +71,9 @@ function slimCharge(c) {
     id: c.id,
     humanReadableId: c.humanReadableId,
     chargePointId: c.chargePointId,
-    userId: c.userId,
+    // user is a nested PublicUser object: { id, displayName, isGuest }
+    userId: c.user?.id ?? null,
+    userGuest: c.user?.isGuest ?? null,
     state: c.state,
     startedAt: c.startedAt,
     createdAt: c.createdAt,
@@ -101,12 +103,12 @@ async function fetchFromMonta() {
   const token = await montaAuth();
 
   // Only fetch charges from the last 90 days to keep payload manageable
-  const from = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const fromDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
   // Fetch all three in parallel; sites gracefully falls back to [] if unavailable
   const [cps, charges, sites] = await Promise.all([
     fetchAll(token, '/charge-points'),
-    fetchAll(token, '/charges', { from }),
+    fetchAll(token, '/charges', { fromDate }),
     fetchAll(token, '/sites').catch(() => []),
   ]);
 
